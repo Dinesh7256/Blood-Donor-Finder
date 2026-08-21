@@ -1,14 +1,64 @@
-// Placeholder controller for authentication routes.
-// This file will hold actual register/login logic in a later phase.
+const admin = require("../config/firebase");
+const User = require("../models/User");
+const ApiError = require("../utils/ApiError");
 
-const authController = {
-  register: async (req, res) => {
-    res.status(200).json({ message: "Register endpoint pending implementation" });
-  },
+const registerUser = async (req, res, next) => {
+  try {
+    const { idToken } = req.body;
 
-  login: async (req, res) => {
-    res.status(200).json({ message: "Login endpoint pending implementation" });
-  },
+    if (!idToken) {
+      return next(new ApiError(400, "Firebase ID token is required"));
+    }
+
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid, email, name } = decodedToken;
+
+    const existingUser = await User.findOne({ firebaseUid: uid });
+
+    if (existingUser) {
+      return next(new ApiError(400, "User already exists"));
+    }
+
+    const newUser = await User.create({
+      firebaseUid: uid,
+      email,
+      name: name || email,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: newUser,
+    });
+  } catch (error) {
+    return next(error);
+  }
 };
 
-module.exports = authController;
+const loginUser = async (req, res, next) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return next(new ApiError(400, "Firebase ID token is required"));
+    }
+
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const user = await User.findOne({ firebaseUid: decodedToken.uid });
+
+    if (!user) {
+      return next(new ApiError(404, "User not found, please register"));
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = {
+  registerUser,
+  loginUser,
+};
