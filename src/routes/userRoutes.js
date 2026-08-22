@@ -12,5 +12,6 @@ router.use(protect);
 router.get("/me", userController.getProfile);
 router.put("/me", userController.updateProfile);
 router.put("/location", userController.updateLocation);
+router.post("/device-token", userController.saveDeviceToken);
 
 module.exports = router;

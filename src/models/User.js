@@ -3,17 +3,20 @@
 
 const mongoose = require("mongoose");
 
-const locationSchema = {
-  type: {
-    type: String,
-    enum: ["Point"],
-    default: "Point",
+const locationSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number],
+      default: [0, 0],
+    },
   },
-  coordinates: {
-    type: [Number],
-    default: [0, 0],
-  },
-};
+  { _id: false }
+);
 
 const userSchema = new mongoose.Schema(
   {
@@ -50,6 +53,14 @@ const userSchema = new mongoose.Schema(
       },
     },
     isAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    fcmTokens: {
+      type: [String],
+      default: [],
+    },
+    isBanned: {
       type: Boolean,
       default: false,
     },

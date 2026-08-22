@@ -6,6 +6,10 @@ const userRoutes = require("./routes/userRoutes");
 const donorRoutes = require("./routes/donorRoutes");
 const bloodRequestRoutes = require("./routes/bloodRequestRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const bloodBankRoutes = require("./routes/bloodBankRoutes");
+const healthTipRoutes = require("./routes/healthTipRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
 const app = express();
@@ -27,6 +31,10 @@ app.use("/api/users", userRoutes);
 app.use("/api/donors", donorRoutes);
 app.use("/api/blood-requests", bloodRequestRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/blood-banks", bloodBankRoutes);
+app.use("/api/health-tips", healthTipRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

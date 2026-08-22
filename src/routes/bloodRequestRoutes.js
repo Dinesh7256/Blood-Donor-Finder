@@ -5,9 +5,9 @@ const express = require("express");
 const router = express.Router();
 
 const bloodRequestController = require("../controllers/bloodRequestController");
-const authMiddleware = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
-router.use(authMiddleware.verifyToken);
+router.use(protect);
 
 router.post("/", bloodRequestController.createBloodRequest);
 router.get("/", bloodRequestController.getBloodRequests);

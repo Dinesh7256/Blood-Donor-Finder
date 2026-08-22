@@ -5,9 +5,9 @@ const express = require("express");
 const router = express.Router();
 
 const donorController = require("../controllers/donorController");
-const authMiddleware = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
-router.use(authMiddleware.verifyToken);
+router.use(protect);
 
 router.get("/", donorController.searchDonors);
 
