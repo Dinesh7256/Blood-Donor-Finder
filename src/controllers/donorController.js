@@ -25,7 +25,7 @@ const searchDonors = async (req, res, next) => {
           $maxDistance: radiusInKilometers * 1000,
         },
       },
-    }).select("-email -fcmTokens -firebaseUid");
+    }).select("-email -fcmTokens -firebaseUid -phone");
 
     return res.status(200).json({ success: true, data: donors });
   } catch (error) {

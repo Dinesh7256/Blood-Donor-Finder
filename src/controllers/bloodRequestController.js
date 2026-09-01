@@ -72,6 +72,9 @@ const acceptRequest = async (req, res, next) => {
   try {
     const request = await findRequestOrThrow(req.params.id);
     if (request.status !== "active") return next(new ApiError(400, "Blood request is not active"));
+    if (String(request.requester) === String(req.user._id)) {
+      return next(new ApiError(400, "Cannot accept your own blood request"));
+    }
 
     request.acceptedDonor = req.user._id;
     request.status = "fulfilled";
