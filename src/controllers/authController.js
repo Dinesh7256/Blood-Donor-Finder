@@ -4,7 +4,7 @@ const ApiError = require("../utils/ApiError");
 
 const registerUser = async (req, res, next) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, name: requestedName } = req.body;
 
     if (!idToken) {
       return next(new ApiError(400, "Firebase ID token is required"));
@@ -22,7 +22,7 @@ const registerUser = async (req, res, next) => {
     const newUser = await User.create({
       firebaseUid: uid,
       email,
-      name: name || email,
+      name: requestedName || name || email,
     });
 
     return res.status(201).json({
