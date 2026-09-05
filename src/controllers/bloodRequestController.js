@@ -1,5 +1,10 @@
 const BloodRequest = require("../models/BloodRequest");
 const ApiError = require("../utils/ApiError");
+const { notifyEligibleDonorsOfBloodRequest } = require("../services/notificationService");
+
+const VALID_BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+const DEFAULT_NOTIFICATION_RADIUS_KM = 10;
+const MAX_NOTIFICATION_RADIUS_KM = 50;
 
 const toLocation = (location) => {
   if (!location) return undefined;
@@ -13,6 +18,23 @@ const toLocation = (location) => {
   return { type: "Point", coordinates: [longitude, latitude] };
 };
 
+const parseNotificationRadius = (radius) => {
+  if (radius === undefined || radius === null || radius === "") {
+    return DEFAULT_NOTIFICATION_RADIUS_KM;
+  }
+
+  const parsedRadius = Number(radius);
+  if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
+    throw new ApiError(400, "radius must be a positive number");
+  }
+
+  if (parsedRadius > MAX_NOTIFICATION_RADIUS_KM) {
+    throw new ApiError(400, `radius cannot exceed ${MAX_NOTIFICATION_RADIUS_KM} km`);
+  }
+
+  return parsedRadius;
+};
+
 const findRequestOrThrow = async (requestId) => {
   const request = await BloodRequest.findById(requestId);
   if (!request) throw new ApiError(404, "Blood request not found");
@@ -21,15 +43,49 @@ const findRequestOrThrow = async (requestId) => {
 
 const createRequest = async (req, res, next) => {
   try {
-    const { patientName, bloodGroup, unitsRequired, hospitalName, location, emergency } = req.body;
-    const request = await BloodRequest.create({
-      requester: req.user._id,
+    const {
       patientName,
       bloodGroup,
       unitsRequired,
       hospitalName,
-      location: toLocation(location),
+      location,
       emergency,
+      radius,
+    } = req.body;
+
+    if (!bloodGroup || !VALID_BLOOD_GROUPS.includes(bloodGroup)) {
+      return next(new ApiError(400, "A valid bloodGroup is required"));
+    }
+
+    if (!hospitalName || typeof hospitalName !== "string" || !hospitalName.trim()) {
+      return next(new ApiError(400, "hospitalName is required"));
+    }
+
+    if (!location) {
+      return next(new ApiError(400, "location is required"));
+    }
+
+    const parsedUnits = unitsRequired === undefined ? 1 : Number(unitsRequired);
+    if (!Number.isFinite(parsedUnits) || parsedUnits < 1) {
+      return next(new ApiError(400, "unitsRequired must be at least 1"));
+    }
+
+    const notificationRadiusKm = parseNotificationRadius(radius);
+
+    const request = await BloodRequest.create({
+      requester: req.user._id,
+      patientName: patientName?.trim() || null,
+      bloodGroup,
+      unitsRequired: parsedUnits,
+      hospitalName: hospitalName.trim(),
+      location: toLocation(location),
+      emergency: Boolean(emergency),
+    });
+
+    await notifyEligibleDonorsOfBloodRequest({
+      bloodRequest: request,
+      requesterId: req.user._id,
+      radiusKm: notificationRadiusKm,
     });
 
     return res.status(201).json({ success: true, data: request });

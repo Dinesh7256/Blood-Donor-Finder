@@ -1,28 +1,120 @@
-const admin = require("../config/firebase");
-const User = require("../models/User");
+const {
+  findEligibleDonorsForBloodRequest,
+  getUniqueFcmTokens,
+} = require("./donorMatchingService");
+const { sendFcmPushNotifications } = require("./fcmPushService");
 
-const sendPushNotification = async (userIds, title, body, dataPayload = {}) => {
-  const users = await User.find({ _id: { $in: userIds } }).select("fcmTokens");
-  const tokens = [...new Set(users.flatMap((user) => user.fcmTokens || []))];
+const buildBloodRequestNotification = (bloodRequest) => {
+  const bloodGroup = bloodRequest.bloodGroup;
+  const requestId = String(bloodRequest._id);
 
-  if (tokens.length === 0) return null;
-
-  const data = Object.fromEntries(
-    Object.entries(dataPayload).map(([key, value]) => [key, String(value)])
-  );
-
-  const message = {
-    tokens,
-    notification: { title, body },
-    data,
+  return {
+    title: "Blood Donation Request",
+    body: `Someone nearby needs ${bloodGroup} blood.`,
+    data: {
+      type: "blood_request",
+      requestId,
+      bloodGroup,
+    },
   };
-
-  const messaging = admin.messaging();
-  if (typeof messaging.sendMulticast === "function") {
-    return messaging.sendMulticast(message);
-  }
-
-  return messaging.sendEachForMulticast(message);
 };
 
-module.exports = { sendPushNotification };
+const buildDeliveries = (donors) => {
+  const deliveries = [];
+  const seenTokens = new Set();
+
+  donors.forEach((donor) => {
+    getUniqueFcmTokens(donor.fcmTokens).forEach((token) => {
+      if (seenTokens.has(token)) {
+        return;
+      }
+
+      seenTokens.add(token);
+      deliveries.push({
+        userId: donor._id,
+        token,
+      });
+    });
+  });
+
+  return deliveries;
+};
+
+const notifyEligibleDonorsOfBloodRequest = async ({
+  bloodRequest,
+  requesterId,
+  radiusKm,
+}) => {
+  const coordinates = bloodRequest?.location?.coordinates;
+
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+    return {
+      notified: false,
+      reason: "missing_request_location",
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+      eligibleDonors: 0,
+    };
+  }
+
+  try {
+    const eligibleDonors = await findEligibleDonorsForBloodRequest({
+      bloodGroup: bloodRequest.bloodGroup,
+      coordinates,
+      radiusKm,
+      requesterId,
+    });
+
+    const deliveries = buildDeliveries(eligibleDonors);
+
+    if (!deliveries.length) {
+      return {
+        notified: false,
+        reason: "no_eligible_recipients",
+        attempted: 0,
+        sent: 0,
+        failed: 0,
+        eligibleDonors: eligibleDonors.length,
+      };
+    }
+
+    const notification = buildBloodRequestNotification(bloodRequest);
+    const deliveryResult = await sendFcmPushNotifications({
+      deliveries,
+      title: notification.title,
+      body: notification.body,
+      data: notification.data,
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        `[notifications] Blood request ${bloodRequest._id}: eligible=${eligibleDonors.length}, attempted=${deliveryResult.attempted}, sent=${deliveryResult.sent}, failed=${deliveryResult.failed}`
+      );
+    }
+
+    return {
+      notified: deliveryResult.sent > 0,
+      reason: deliveryResult.sent > 0 ? "sent" : "delivery_failed",
+      eligibleDonors: eligibleDonors.length,
+      ...deliveryResult,
+    };
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[notifications] Blood request notification failed:", error.message);
+    }
+
+    return {
+      notified: false,
+      reason: "delivery_error",
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+      eligibleDonors: 0,
+    };
+  }
+};
+
+module.exports = {
+  notifyEligibleDonorsOfBloodRequest,
+};

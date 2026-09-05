@@ -1,4 +1,13 @@
 const ApiError = require("../utils/ApiError");
+const { isFcmRegistrationToken, isLikelyFirebaseIdToken } = require("../utils/fcmToken");
+
+const parseDeviceToken = (body) => {
+  const token = body?.token ?? body?.fcmToken;
+  if (!token || typeof token !== "string") {
+    return null;
+  }
+  return token.trim();
+};
 
 const userController = {
   getProfile: async (req, res, next) => {
@@ -39,6 +48,7 @@ const userController = {
         coordinates: [parsedLongitude, parsedLatitude],
       };
 
+      req.user.markModified("location");
       const user = await req.user.save();
       return res.status(200).json({ success: true, data: user });
     } catch (error) {
@@ -46,21 +56,61 @@ const userController = {
     }
   },
 
-  saveDeviceToken: async (req, res, next) => {
+  registerDeviceToken: async (req, res, next) => {
     try {
-      const { fcmToken } = req.body;
+      const token = parseDeviceToken(req.body);
 
-      if (!fcmToken || typeof fcmToken !== "string") {
-        return next(new ApiError(400, "FCM token is required"));
+      if (!token) {
+        return next(new ApiError(400, "token is required"));
+      }
+
+      if (isLikelyFirebaseIdToken(token)) {
+        return next(new ApiError(400, "Invalid FCM token format"));
+      }
+
+      if (!isFcmRegistrationToken(token)) {
+        return next(new ApiError(400, "A valid FCM registration token is required"));
       }
 
       if (!req.user.fcmTokens) req.user.fcmTokens = [];
-      if (!req.user.fcmTokens.includes(fcmToken)) {
-        req.user.fcmTokens.push(fcmToken);
+      if (!req.user.fcmTokens.includes(token)) {
+        req.user.fcmTokens.push(token);
         await req.user.save();
       }
 
-      return res.status(200).json({ success: true, data: req.user });
+      return res.status(200).json({
+        success: true,
+        data: { registered: true, tokenCount: req.user.fcmTokens.length },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  removeDeviceToken: async (req, res, next) => {
+    try {
+      const token = parseDeviceToken(req.body);
+
+      if (!token) {
+        return next(new ApiError(400, "token is required"));
+      }
+
+      if (!req.user.fcmTokens?.length) {
+        return res.status(200).json({ success: true, data: { removed: false } });
+      }
+
+      const nextTokens = req.user.fcmTokens.filter((storedToken) => storedToken !== token);
+      const removed = nextTokens.length !== req.user.fcmTokens.length;
+
+      if (removed) {
+        req.user.fcmTokens = nextTokens;
+        await req.user.save();
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: { removed, tokenCount: req.user.fcmTokens.length },
+      });
     } catch (error) {
       return next(error);
     }
