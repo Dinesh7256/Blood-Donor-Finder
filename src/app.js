@@ -36,6 +36,13 @@ app.use("/api/health-tips", healthTipRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRoutes);
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Blood Donor Finder API is running",
+  });
+});
+
 app.use(notFound);
 app.use(errorHandler);
 
