@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "npx nodemon src/server",
-    "seed:users": "node scripts/seedUsers.js",
-    "seed:users:reset": "node scripts/seedUsers.js --reset"
-  },
+  "test": "echo \"Error: no test specified\" && exit 1",
+  "start": "node src/server.js",
+  "dev": "nodemon src/server.js",
+  "seed:users": "node scripts/seedUsers.js",
+  "seed:users:reset": "node scripts/seedUsers.js --reset"
+},
   "author": "",
   "license": "ISC",
   "description": "",
