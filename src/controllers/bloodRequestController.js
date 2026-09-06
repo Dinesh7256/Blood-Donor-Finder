@@ -1,6 +1,7 @@
 const BloodRequest = require("../models/BloodRequest");
 const ApiError = require("../utils/ApiError");
 const { notifyEligibleDonorsOfBloodRequest } = require("../services/notificationService");
+const { logFcm } = require("../utils/fcmLog");
 
 const VALID_BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const DEFAULT_NOTIFICATION_RADIUS_KM = 10;
@@ -82,13 +83,17 @@ const createRequest = async (req, res, next) => {
       emergency: Boolean(emergency),
     });
 
-    await notifyEligibleDonorsOfBloodRequest({
+    logFcm(`Blood request created id=${request._id} requester=${req.user._id} bloodGroup=${bloodGroup}`);
+
+    const notificationResult = await notifyEligibleDonorsOfBloodRequest({
       bloodRequest: request,
       requesterId: req.user._id,
       radiusKm: notificationRadiusKm,
     });
 
-    return res.status(201).json({ success: true, data: request });
+    logFcm(`Blood request notification result=${notificationResult.reason}`);
+
+    return res.status(201).json({ success: true, data: request, notification: notificationResult });
   } catch (error) {
     return next(error);
   }

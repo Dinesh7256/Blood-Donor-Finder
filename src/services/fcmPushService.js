@@ -1,5 +1,6 @@
 const admin = require("../config/firebase");
 const User = require("../models/User");
+const { logFcm, logFcmError, maskToken } = require("../utils/fcmLog");
 
 const FCM_BATCH_SIZE = 500;
 
@@ -73,7 +74,9 @@ const sendFcmPushNotifications = async ({ deliveries, title, body, data }) => {
   const messaging = admin.messaging();
 
   if (!messaging || typeof messaging.sendEachForMulticast !== "function") {
-    throw new Error("Firebase Cloud Messaging is not configured");
+    const error = new Error("Firebase Cloud Messaging is not configured");
+    logFcmError("Firebase Admin messaging unavailable", error);
+    throw error;
   }
 
   const normalizedData = Object.fromEntries(
@@ -115,6 +118,10 @@ const sendFcmPushNotifications = async ({ deliveries, title, body, data }) => {
         }
 
         failed += 1;
+        logFcmError(
+          `Delivery failed token=${maskToken(delivery.token)}`,
+          ticket.error || new Error("Unknown FCM delivery error")
+        );
 
         const errorCode = ticket.error?.code;
         if (INVALID_FCM_ERROR_CODES.has(errorCode)) {
@@ -127,17 +134,14 @@ const sendFcmPushNotifications = async ({ deliveries, title, body, data }) => {
       });
     } catch (error) {
       failed += chunkDeliveries.length;
-
-      if (process.env.NODE_ENV !== "production") {
-        console.warn("[fcm-push] Batch delivery failed:", error.message);
-      }
+      logFcmError("Batch FCM delivery failed", error);
     }
   }
 
   const { removedCount } = await removeInvalidTokens(invalidEntries);
 
-  if (removedCount > 0 && process.env.NODE_ENV !== "production") {
-    console.log(`[fcm-push] Removed ${removedCount} invalid FCM token(s)`);
+  if (removedCount > 0) {
+    logFcm(`Removed ${removedCount} invalid FCM token(s)`);
   }
 
   return {

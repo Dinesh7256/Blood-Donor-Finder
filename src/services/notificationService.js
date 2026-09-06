@@ -3,6 +3,7 @@ const {
   getUniqueFcmTokens,
 } = require("./donorMatchingService");
 const { sendFcmPushNotifications } = require("./fcmPushService");
+const { logFcm, logFcmError, maskToken } = require("../utils/fcmLog");
 
 const buildBloodRequestNotification = (bloodRequest) => {
   const bloodGroup = bloodRequest.bloodGroup;
@@ -48,6 +49,7 @@ const notifyEligibleDonorsOfBloodRequest = async ({
   const coordinates = bloodRequest?.location?.coordinates;
 
   if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+    logFcm("Blood request notification skipped — missing request location");
     return {
       notified: false,
       reason: "missing_request_location",
@@ -68,7 +70,12 @@ const notifyEligibleDonorsOfBloodRequest = async ({
 
     const deliveries = buildDeliveries(eligibleDonors);
 
+    logFcm(
+      `Blood request ${bloodRequest._id}: eligibleDonors=${eligibleDonors.length}, deliveries=${deliveries.length}`
+    );
+
     if (!deliveries.length) {
+      logFcm("No eligible recipients with device tokens — notification not sent");
       return {
         notified: false,
         reason: "no_eligible_recipients",
@@ -80,6 +87,11 @@ const notifyEligibleDonorsOfBloodRequest = async ({
     }
 
     const notification = buildBloodRequestNotification(bloodRequest);
+    logFcm("Sending Firebase notification");
+    deliveries.slice(0, 3).forEach((delivery, index) => {
+      logFcm(`Recipient ${index + 1} donorId=${delivery.userId} token=${maskToken(delivery.token)}`);
+    });
+
     const deliveryResult = await sendFcmPushNotifications({
       deliveries,
       title: notification.title,
@@ -87,11 +99,9 @@ const notifyEligibleDonorsOfBloodRequest = async ({
       data: notification.data,
     });
 
-    if (process.env.NODE_ENV !== "production") {
-      console.log(
-        `[notifications] Blood request ${bloodRequest._id}: eligible=${eligibleDonors.length}, attempted=${deliveryResult.attempted}, sent=${deliveryResult.sent}, failed=${deliveryResult.failed}`
-      );
-    }
+    logFcm(
+      `Firebase response: attempted=${deliveryResult.attempted}, sent=${deliveryResult.sent}, failed=${deliveryResult.failed}, invalidRemoved=${deliveryResult.invalidTokensRemoved}`
+    );
 
     return {
       notified: deliveryResult.sent > 0,
@@ -100,9 +110,7 @@ const notifyEligibleDonorsOfBloodRequest = async ({
       ...deliveryResult,
     };
   } catch (error) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[notifications] Blood request notification failed:", error.message);
-    }
+    logFcmError("Blood request notification failed", error);
 
     return {
       notified: false,
