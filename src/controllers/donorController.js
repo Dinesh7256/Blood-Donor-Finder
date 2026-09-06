@@ -60,6 +60,10 @@ const searchDonors = async (req, res, next) => {
       data: donors.filter((donor) => hasValidLocation(donor.location)),
     });
   } catch (error) {
+    if (error?.name === "MongoServerError" && /geo/i.test(error.message || "")) {
+      return next(new ApiError(400, "Your location is required to search for donors"));
+    }
+
     return next(error);
   }
 };
