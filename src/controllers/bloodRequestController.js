@@ -1,9 +1,22 @@
 const BloodRequest = require("../models/BloodRequest");
 const ApiError = require("../utils/ApiError");
-const { notifyEligibleDonorsOfBloodRequest } = require("../services/notificationService");
+const {
+  notifyEligibleDonorsOfBloodRequest,
+  notifyRequesterOfBloodRequestAcceptance,
+} = require("../services/notificationService");
 const { logFcm } = require("../utils/fcmLog");
+const { BLOOD_GROUPS } = require("../constants/bloodGroups");
+const { assertCanCreateBloodRequest } = require("../utils/profileCompletion");
+const {
+  createBloodRequestWithRecipients,
+  respondToBloodRequest,
+  getIncomingRequestsForDonor,
+  getRequestsForRequester,
+  getAuthorizedRequestDetail,
+  serializeIncomingRequestForDonor,
+  serializeRequestForRequester,
+} = require("../services/bloodRequestService");
 
-const VALID_BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const DEFAULT_NOTIFICATION_RADIUS_KM = 10;
 const MAX_NOTIFICATION_RADIUS_KM = 50;
 
@@ -44,17 +57,20 @@ const findRequestOrThrow = async (requestId) => {
 
 const createRequest = async (req, res, next) => {
   try {
+    assertCanCreateBloodRequest(req.user);
+
     const {
       patientName,
       bloodGroup,
       unitsRequired,
       hospitalName,
+      message,
       location,
       emergency,
       radius,
     } = req.body;
 
-    if (!bloodGroup || !VALID_BLOOD_GROUPS.includes(bloodGroup)) {
+    if (!bloodGroup || !BLOOD_GROUPS.includes(bloodGroup)) {
       return next(new ApiError(400, "A valid bloodGroup is required"));
     }
 
@@ -71,16 +87,23 @@ const createRequest = async (req, res, next) => {
       return next(new ApiError(400, "unitsRequired must be at least 1"));
     }
 
+    const trimmedMessage =
+      typeof message === "string" && message.trim() ? message.trim().slice(0, 500) : null;
+
     const notificationRadiusKm = parseNotificationRadius(radius);
 
-    const request = await BloodRequest.create({
-      requester: req.user._id,
-      patientName: patientName?.trim() || null,
-      bloodGroup,
-      unitsRequired: parsedUnits,
-      hospitalName: hospitalName.trim(),
-      location: toLocation(location),
-      emergency: Boolean(emergency),
+    const { request, recipients, eligibleDonors, summary } = await createBloodRequestWithRecipients({
+      requester: req.user,
+      payload: {
+        patientName: patientName?.trim() || null,
+        bloodGroup,
+        unitsRequired: parsedUnits,
+        hospitalName: hospitalName.trim(),
+        message: trimmedMessage,
+        location: toLocation(location),
+        emergency: Boolean(emergency),
+      },
+      radiusKm: notificationRadiusKm,
     });
 
     logFcm(`Blood request created id=${request._id} requester=${req.user._id} bloodGroup=${bloodGroup}`);
@@ -93,16 +116,30 @@ const createRequest = async (req, res, next) => {
 
     logFcm(`Blood request notification result=${notificationResult.reason}`);
 
-    return res.status(201).json({ success: true, data: request, notification: notificationResult });
+    return res.status(201).json({
+      success: true,
+      data: serializeRequestForRequester(request, recipients),
+      notification: notificationResult,
+      eligibleDonors: eligibleDonors.length,
+    });
   } catch (error) {
+    if (error.statusCode === 409 && error.data) {
+      return res.status(409).json({
+        success: false,
+        message: error.message,
+        data: error.data,
+      });
+    }
     return next(error);
   }
 };
 
 const getActiveRequests = async (req, res, next) => {
   try {
-    const requests = await BloodRequest.find({ status: "active" }).sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, data: requests });
+    return res.status(403).json({
+      success: false,
+      message: "Use /blood-requests/mine or /blood-requests/incoming for your requests.",
+    });
   } catch (error) {
     return next(error);
   }
@@ -110,8 +147,18 @@ const getActiveRequests = async (req, res, next) => {
 
 const getMyRequests = async (req, res, next) => {
   try {
-    const requests = await BloodRequest.find({ requester: req.user._id }).sort({ createdAt: -1 });
+    const requests = await getRequestsForRequester(req.user._id);
     return res.status(200).json({ success: true, data: requests });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getIncomingRequests = async (req, res, next) => {
+  try {
+    const incoming = await getIncomingRequestsForDonor(req.user._id);
+    const data = incoming.map(serializeIncomingRequestForDonor);
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     return next(error);
   }
@@ -119,31 +166,59 @@ const getMyRequests = async (req, res, next) => {
 
 const getRequestById = async (req, res, next) => {
   try {
-    const request = await BloodRequest.findById(req.params.id)
-      .populate("requester", "name bloodGroup")
-      .populate("acceptedDonor", "name bloodGroup");
-    if (!request) return next(new ApiError(404, "Blood request not found"));
-    return res.status(200).json({ success: true, data: request });
+    const data = await getAuthorizedRequestDetail({
+      requestId: req.params.id,
+      viewerUserId: req.user._id,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const respondToRequest = async (req, res, next) => {
+  try {
+    const response = req.body?.response;
+
+    if (response !== "accept" && response !== "reject") {
+      return next(new ApiError(400, "response must be 'accept' or 'reject'"));
+    }
+
+    const { request, recipient } = await respondToBloodRequest({
+      requestId: req.params.id,
+      donorId: req.user._id,
+      response,
+    });
+
+    if (response === "accept") {
+      await notifyRequesterOfBloodRequestAcceptance({
+        bloodRequest: request,
+        donor: req.user,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        requestId: request._id,
+        recipientId: recipient._id,
+        status: recipient.status,
+        respondedAt: recipient.respondedAt,
+      },
+    });
   } catch (error) {
     return next(error);
   }
 };
 
 const acceptRequest = async (req, res, next) => {
-  try {
-    const request = await findRequestOrThrow(req.params.id);
-    if (request.status !== "active") return next(new ApiError(400, "Blood request is not active"));
-    if (String(request.requester) === String(req.user._id)) {
-      return next(new ApiError(400, "Cannot accept your own blood request"));
-    }
+  req.body = { ...(req.body || {}), response: "accept" };
+  return respondToRequest(req, res, next);
+};
 
-    request.acceptedDonor = req.user._id;
-    request.status = "fulfilled";
-    await request.save();
-    return res.status(200).json({ success: true, data: request });
-  } catch (error) {
-    return next(error);
-  }
+const rejectRequest = async (req, res, next) => {
+  req.body = { ...(req.body || {}), response: "reject" };
+  return respondToRequest(req, res, next);
 };
 
 const cancelRequest = async (req, res, next) => {
@@ -151,6 +226,10 @@ const cancelRequest = async (req, res, next) => {
     const request = await findRequestOrThrow(req.params.id);
     if (String(request.requester) !== String(req.user._id)) {
       return next(new ApiError(403, "Only the requester can cancel this request"));
+    }
+
+    if (request.status !== "active") {
+      return next(new ApiError(400, "This request is no longer available."));
     }
 
     request.status = "cancelled";
@@ -165,13 +244,19 @@ module.exports = {
   createRequest,
   getActiveRequests,
   getMyRequests,
+  getIncomingRequests,
   getRequestById,
+  respondToRequest,
   acceptRequest,
+  rejectRequest,
   cancelRequest,
   createBloodRequest: createRequest,
   getBloodRequests: getActiveRequests,
   getMyBloodRequests: getMyRequests,
+  getIncomingBloodRequests: getIncomingRequests,
   getBloodRequestById: getRequestById,
+  respondToBloodRequest: respondToRequest,
   acceptBloodRequest: acceptRequest,
+  rejectBloodRequest: rejectRequest,
   cancelBloodRequest: cancelRequest,
 };

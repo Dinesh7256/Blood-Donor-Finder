@@ -1,0 +1,23 @@
+const DONOR_RESPONSE_STATUS = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+};
+
+const REQUEST_LIFECYCLE_STATUS = {
+  ACTIVE: "active",
+  FULFILLED: "fulfilled",
+  CANCELLED: "cancelled",
+  EXPIRED: "expired",
+};
+
+const RESPONDABLE_REQUEST_STATUSES = new Set([REQUEST_LIFECYCLE_STATUS.ACTIVE]);
+
+const DEFAULT_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
+
+module.exports = {
+  DONOR_RESPONSE_STATUS,
+  REQUEST_LIFECYCLE_STATUS,
+  RESPONDABLE_REQUEST_STATUSES,
+  DEFAULT_REQUEST_TTL_MS,
+};

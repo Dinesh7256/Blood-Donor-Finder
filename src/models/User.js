@@ -2,6 +2,7 @@
 // Stores personal information, blood group, availability, and location.
 
 const mongoose = require("mongoose");
+const { computeProfileCompleted } = require("../utils/profileCompletion");
 
 const locationSchema = new mongoose.Schema(
   {
@@ -39,6 +40,17 @@ const userSchema = new mongoose.Schema(
     phone: {
       type: String,
       default: null,
+      trim: true,
+    },
+    phoneVerified: {
+      type: Boolean,
+      default: false,
+    },
+    address: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 200,
     },
     bloodGroup: {
       type: String,
@@ -53,6 +65,10 @@ const userSchema = new mongoose.Schema(
       },
     },
     isAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    profileCompleted: {
       type: Boolean,
       default: false,
     },
@@ -76,5 +92,11 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.index({ location: "2dsphere" });
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
+
+userSchema.pre("save", function updateProfileCompletion(next) {
+  this.profileCompleted = computeProfileCompleted(this);
+  next();
+});
 
 module.exports = mongoose.model("User", userSchema);

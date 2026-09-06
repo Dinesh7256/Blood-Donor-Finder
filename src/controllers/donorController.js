@@ -1,5 +1,24 @@
 const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
+const { BLOOD_GROUPS } = require("../constants/bloodGroups");
+
+const MAX_SEARCH_RADIUS_KM = 50;
+
+const hasValidLocation = (location) => {
+  const coordinates = location?.coordinates;
+
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+    return false;
+  }
+
+  const [longitude, latitude] = coordinates;
+
+  return (
+    Number.isFinite(longitude) &&
+    Number.isFinite(latitude) &&
+    !(longitude === 0 && latitude === 0)
+  );
+};
 
 const searchDonors = async (req, res, next) => {
   try {
@@ -7,10 +26,19 @@ const searchDonors = async (req, res, next) => {
     const radiusInKilometers = Number(radius);
     const coordinates = req.user.location && req.user.location.coordinates;
 
-    if (!bloodGroup || !Number.isFinite(radiusInKilometers) || radiusInKilometers <= 0) {
-      return next(new ApiError(400, "bloodGroup and a positive radius are required"));
+    if (!bloodGroup || !BLOOD_GROUPS.includes(bloodGroup)) {
+      return next(new ApiError(400, "A valid bloodGroup is required"));
     }
-    if (!coordinates || coordinates.length !== 2) {
+
+    if (!Number.isFinite(radiusInKilometers) || radiusInKilometers <= 0) {
+      return next(new ApiError(400, "A positive radius is required"));
+    }
+
+    if (radiusInKilometers > MAX_SEARCH_RADIUS_KM) {
+      return next(new ApiError(400, `Radius cannot exceed ${MAX_SEARCH_RADIUS_KM} km`));
+    }
+
+    if (!coordinates || coordinates.length !== 2 || !hasValidLocation(req.user.location)) {
       return next(new ApiError(400, "Your location is required to search for donors"));
     }
 
@@ -27,7 +55,10 @@ const searchDonors = async (req, res, next) => {
       },
     }).select("-email -fcmTokens -firebaseUid -phone");
 
-    return res.status(200).json({ success: true, data: donors });
+    return res.status(200).json({
+      success: true,
+      data: donors.filter((donor) => hasValidLocation(donor.location)),
+    });
   } catch (error) {
     return next(error);
   }

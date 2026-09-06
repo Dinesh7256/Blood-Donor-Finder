@@ -4,6 +4,7 @@ const {
 } = require("./donorMatchingService");
 const { sendFcmPushNotifications } = require("./fcmPushService");
 const { logFcm, logFcmError, maskToken } = require("../utils/fcmLog");
+const User = require("../models/User");
 
 const buildBloodRequestNotification = (bloodRequest) => {
   const bloodGroup = bloodRequest.bloodGroup;
@@ -16,6 +17,7 @@ const buildBloodRequestNotification = (bloodRequest) => {
       type: "blood_request",
       requestId,
       bloodGroup,
+      screen: "requests",
     },
   };
 };
@@ -123,6 +125,60 @@ const notifyEligibleDonorsOfBloodRequest = async ({
   }
 };
 
+const notifyRequesterOfBloodRequestAcceptance = async ({ bloodRequest, donor }) => {
+  const requester = await User.findById(bloodRequest.requester).select("_id fcmTokens name");
+
+  if (!requester) {
+    logFcm(`Acceptance notification skipped — requester not found for request ${bloodRequest._id}`);
+    return {
+      notified: false,
+      reason: "requester_not_found",
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+    };
+  }
+
+  const deliveries = buildDeliveries([requester]);
+
+  if (!deliveries.length) {
+    logFcm(`Acceptance notification skipped — requester has no FCM tokens request=${bloodRequest._id}`);
+    return {
+      notified: false,
+      reason: "no_requester_tokens",
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+    };
+  }
+
+  const notification = {
+    title: "Donor Accepted",
+    body: "Good news! A donor has accepted your blood request.",
+    data: {
+      type: "blood_request_accepted",
+      requestId: String(bloodRequest._id),
+      screen: "request_detail",
+    },
+  };
+
+  logFcm(`Sending acceptance notification for request ${bloodRequest._id} donor=${donor._id}`);
+
+  const deliveryResult = await sendFcmPushNotifications({
+    deliveries,
+    title: notification.title,
+    body: notification.body,
+    data: notification.data,
+  });
+
+  return {
+    notified: deliveryResult.sent > 0,
+    reason: deliveryResult.sent > 0 ? "sent" : "delivery_failed",
+    ...deliveryResult,
+  };
+};
+
 module.exports = {
   notifyEligibleDonorsOfBloodRequest,
+  notifyRequesterOfBloodRequestAcceptance,
 };

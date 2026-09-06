@@ -18,6 +18,10 @@ const protect = async (req, res, next) => {
       return next(new ApiError(404, "User not found in database"));
     }
 
+    if (user.isBanned) {
+      return next(new ApiError(403, "Your account has been suspended."));
+    }
+
     req.user = user;
     next();
   } catch (error) {

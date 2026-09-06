@@ -27,18 +27,15 @@ const findEligibleDonorsForBloodRequest = async ({
     bloodGroup,
     isAvailable: true,
     isBanned: false,
-    "fcmTokens.0": { $exists: true },
     location: {
       $nearSphere: {
         $geometry: { type: "Point", coordinates },
         $maxDistance: radiusKm * 1000,
       },
     },
-  }).select("_id fcmTokens location");
+  }).select("_id fcmTokens location name bloodGroup");
 
-  return donors.filter(
-    (donor) => hasValidLocation(donor.location) && getUniqueFcmTokens(donor.fcmTokens).length > 0
-  );
+  return donors.filter((donor) => hasValidLocation(donor.location));
 };
 
 module.exports = {

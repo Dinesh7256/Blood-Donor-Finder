@@ -1,5 +1,7 @@
 const ApiError = require("../utils/ApiError");
 const { isFcmRegistrationToken, isLikelyFirebaseIdToken } = require("../utils/fcmToken");
+const { computeProfileCompleted, serializeUserForClient } = require("../utils/profileCompletion");
+const { validateName, validateBloodGroup, validatePhone, validateAddress } = require("../utils/userValidation");
 
 const parseDeviceToken = (body) => {
   const token = body?.token ?? body?.fcmToken;
@@ -9,10 +11,24 @@ const parseDeviceToken = (body) => {
   return token.trim();
 };
 
+const handleDuplicatePhoneError = (error, next) => {
+  if (error?.code === 11000 && error?.keyPattern?.phone) {
+    return next(new ApiError(409, "This phone number is already in use."));
+  }
+  return next(error);
+};
+
 const userController = {
   getProfile: async (req, res, next) => {
     try {
-      return res.status(200).json({ success: true, data: req.user });
+      const profileCompleted = computeProfileCompleted(req.user);
+
+      if (req.user.profileCompleted !== profileCompleted) {
+        req.user.profileCompleted = profileCompleted;
+        await req.user.save();
+      }
+
+      return res.status(200).json({ success: true, data: serializeUserForClient(req.user) });
     } catch (error) {
       return next(error);
     }
@@ -20,16 +36,52 @@ const userController = {
 
   updateProfile: async (req, res, next) => {
     try {
-      const { name, bloodGroup, isAvailable } = req.body;
+      const { name, phone, bloodGroup, address, isAvailable } = req.body;
 
-      if (name !== undefined) req.user.name = name;
-      if (bloodGroup !== undefined) req.user.bloodGroup = bloodGroup;
-      if (isAvailable !== undefined) req.user.isAvailable = isAvailable;
+      if (name !== undefined) {
+        const nameResult = validateName(name);
+        if (!nameResult.valid) {
+          return next(new ApiError(400, nameResult.message));
+        }
+        req.user.name = nameResult.value;
+      }
+
+      if (phone !== undefined) {
+        const phoneResult = validatePhone(phone, { required: true });
+        if (!phoneResult.valid) {
+          return next(new ApiError(400, phoneResult.message));
+        }
+
+        if (phoneResult.value !== req.user.phone) {
+          req.user.phone = phoneResult.value;
+          req.user.phoneVerified = false;
+        }
+      }
+
+      if (bloodGroup !== undefined) {
+        const bloodGroupResult = validateBloodGroup(bloodGroup);
+        if (!bloodGroupResult.valid) {
+          return next(new ApiError(400, bloodGroupResult.message));
+        }
+        req.user.bloodGroup = bloodGroupResult.value;
+      }
+
+      if (address !== undefined) {
+        const addressResult = validateAddress(address, { required: false });
+        if (!addressResult.valid) {
+          return next(new ApiError(400, addressResult.message));
+        }
+        req.user.address = addressResult.value;
+      }
+
+      if (isAvailable !== undefined) {
+        req.user.isAvailable = Boolean(isAvailable);
+      }
 
       const user = await req.user.save();
-      return res.status(200).json({ success: true, data: user });
+      return res.status(200).json({ success: true, data: serializeUserForClient(user) });
     } catch (error) {
-      return next(error);
+      return handleDuplicatePhoneError(error, next);
     }
   },
 
@@ -43,6 +95,14 @@ const userController = {
         return next(new ApiError(400, "Valid latitude and longitude are required"));
       }
 
+      if (parsedLatitude < -90 || parsedLatitude > 90) {
+        return next(new ApiError(400, "Latitude must be between -90 and 90"));
+      }
+
+      if (parsedLongitude < -180 || parsedLongitude > 180) {
+        return next(new ApiError(400, "Longitude must be between -180 and 180"));
+      }
+
       req.user.location = {
         type: "Point",
         coordinates: [parsedLongitude, parsedLatitude],
@@ -50,7 +110,7 @@ const userController = {
 
       req.user.markModified("location");
       const user = await req.user.save();
-      return res.status(200).json({ success: true, data: user });
+      return res.status(200).json({ success: true, data: serializeUserForClient(user) });
     } catch (error) {
       return next(error);
     }

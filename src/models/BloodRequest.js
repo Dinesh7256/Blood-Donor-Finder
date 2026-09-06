@@ -2,6 +2,7 @@
 // Each request is tied to a requester and may be accepted by a donor.
 
 const mongoose = require("mongoose");
+const { DEFAULT_REQUEST_TTL_MS } = require("../constants/requestStatuses");
 
 const locationSchema = new mongoose.Schema(
   {
@@ -51,14 +52,24 @@ const bloodRequestSchema = new mongoose.Schema(
         coordinates: [0, 0],
       },
     },
+    message: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
+    },
     emergency: {
       type: Boolean,
       default: false,
     },
     status: {
       type: String,
-      enum: ["active", "fulfilled", "cancelled"],
+      enum: ["active", "fulfilled", "cancelled", "expired"],
       default: "active",
+    },
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + DEFAULT_REQUEST_TTL_MS),
     },
     acceptedDonor: {
       type: mongoose.Schema.Types.ObjectId,
@@ -72,5 +83,7 @@ const bloodRequestSchema = new mongoose.Schema(
 );
 
 bloodRequestSchema.index({ location: "2dsphere" });
+bloodRequestSchema.index({ requester: 1, status: 1, createdAt: -1 });
+bloodRequestSchema.index({ status: 1, expiresAt: 1 });
 
 module.exports = mongoose.model("BloodRequest", bloodRequestSchema);

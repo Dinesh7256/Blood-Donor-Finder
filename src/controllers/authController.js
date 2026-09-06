@@ -1,6 +1,7 @@
 const admin = require("../config/firebase");
 const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
+const { serializeUserForClient } = require("../utils/profileCompletion");
 
 const registerUser = async (req, res, next) => {
   try {
@@ -16,7 +17,15 @@ const registerUser = async (req, res, next) => {
     const existingUser = await User.findOne({ firebaseUid: uid });
 
     if (existingUser) {
-      return next(new ApiError(400, "User already exists"));
+      if (existingUser.isBanned) {
+        return next(new ApiError(403, "Your account has been suspended."));
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: serializeUserForClient(existingUser),
+        message: "User already exists",
+      });
     }
 
     const newUser = await User.create({
@@ -27,7 +36,7 @@ const registerUser = async (req, res, next) => {
 
     return res.status(201).json({
       success: true,
-      data: newUser,
+      data: serializeUserForClient(newUser),
     });
   } catch (error) {
     return next(error);
@@ -49,9 +58,13 @@ const loginUser = async (req, res, next) => {
       return next(new ApiError(404, "User not found, please register"));
     }
 
+    if (user.isBanned) {
+      return next(new ApiError(403, "Your account has been suspended."));
+    }
+
     return res.status(200).json({
       success: true,
-      data: user,
+      data: serializeUserForClient(user),
     });
   } catch (error) {
     return next(error);
