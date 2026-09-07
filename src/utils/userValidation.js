@@ -91,12 +91,30 @@ const validateAddress = (value, { required = false } = {}) => {
   return { valid: true, value: address };
 };
 
+const toE164IndianPhone = (value) => {
+  const normalized = normalizeIndianPhone(value);
+  return normalized ? `+91${normalized}` : null;
+};
+
+const phonesMatch = (phoneA, phoneB) => {
+  const normalizedA = normalizeIndianPhone(phoneA);
+  const normalizedB = normalizeIndianPhone(phoneB);
+
+  if (!normalizedA || !normalizedB) {
+    return false;
+  }
+
+  return normalizedA === normalizedB;
+};
+
 module.exports = {
   BLOOD_GROUPS,
   NAME_MIN_LENGTH,
   NAME_MAX_LENGTH,
   ADDRESS_MAX_LENGTH,
   normalizeIndianPhone,
+  toE164IndianPhone,
+  phonesMatch,
   validateName,
   validateBloodGroup,
   validatePhone,

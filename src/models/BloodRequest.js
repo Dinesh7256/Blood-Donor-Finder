@@ -85,5 +85,12 @@ const bloodRequestSchema = new mongoose.Schema(
 bloodRequestSchema.index({ location: "2dsphere" });
 bloodRequestSchema.index({ requester: 1, status: 1, createdAt: -1 });
 bloodRequestSchema.index({ status: 1, expiresAt: 1 });
+bloodRequestSchema.index(
+  { requester: 1, bloodGroup: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "active" },
+  }
+);
 
 module.exports = mongoose.model("BloodRequest", bloodRequestSchema);

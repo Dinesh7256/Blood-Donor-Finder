@@ -94,6 +94,7 @@ const serializeRequestForRequester = (request, recipients = []) => {
 
 const serializeIncomingRequestForDonor = (recipient) => {
   const request = recipient.bloodRequest;
+  const includeContact = recipient.status === DONOR_RESPONSE_STATUS.ACCEPTED;
 
   return {
     recipientId: recipient._id,
@@ -105,7 +106,7 @@ const serializeIncomingRequestForDonor = (recipient) => {
     createdAt: recipient.createdAt,
     request: {
       ...serializeBloodRequestBase(request),
-      requester: sanitizeRequester(request.requester),
+      requester: sanitizeRequester(request.requester, { includeContact }),
     },
   };
 };
@@ -161,6 +162,14 @@ const loadRespondableRequest = async (requestId) => {
     throw new ApiError(400, "This blood request is no longer active.");
   }
 
+  if (request.expiresAt && request.expiresAt <= new Date()) {
+    await BloodRequest.updateOne(
+      { _id: request._id, status: REQUEST_LIFECYCLE_STATUS.ACTIVE },
+      { $set: { status: REQUEST_LIFECYCLE_STATUS.EXPIRED } }
+    );
+    throw new ApiError(400, "This blood request is no longer active.");
+  }
+
   assertRequestIsRespondable(request);
   return request;
 };
@@ -177,15 +186,41 @@ const assertRequestIsRespondable = (request) => {
   }
 };
 
-const findRecentDuplicateRequest = async (requesterId, bloodGroup) => {
-  const cutoff = new Date(Date.now() - DUPLICATE_REQUEST_WINDOW_MS);
-
-  return BloodRequest.findOne({
+const findActiveDuplicateRequest = async (requesterId, bloodGroup) =>
+  BloodRequest.findOne({
     requester: requesterId,
     bloodGroup,
     status: REQUEST_LIFECYCLE_STATUS.ACTIVE,
-    createdAt: { $gte: cutoff },
   }).sort({ createdAt: -1 });
+
+const cancelBloodRequest = async ({ requestId, requesterId }) => {
+  const request = await BloodRequest.findOneAndUpdate(
+    {
+      _id: requestId,
+      requester: requesterId,
+      status: REQUEST_LIFECYCLE_STATUS.ACTIVE,
+    },
+    {
+      $set: { status: REQUEST_LIFECYCLE_STATUS.CANCELLED },
+    },
+    { new: true }
+  );
+
+  if (!request) {
+    const existingRequest = await BloodRequest.findById(requestId);
+
+    if (!existingRequest) {
+      throw new ApiError(404, "Blood request not found");
+    }
+
+    if (String(existingRequest.requester) !== String(requesterId)) {
+      throw new ApiError(403, "Only the requester can cancel this request");
+    }
+
+    throw new ApiError(400, "This blood request is no longer active.");
+  }
+
+  return request;
 };
 
 const createBloodRequestWithRecipients = async ({
@@ -193,7 +228,7 @@ const createBloodRequestWithRecipients = async ({
   payload,
   radiusKm,
 }) => {
-  const duplicate = await findRecentDuplicateRequest(requester._id, payload.bloodGroup);
+  const duplicate = await findActiveDuplicateRequest(requester._id, payload.bloodGroup);
 
   if (duplicate) {
     const error = new ApiError(409, "You already have an active blood request for this blood group.");
@@ -211,6 +246,15 @@ const createBloodRequestWithRecipients = async ({
     location: payload.location,
     emergency: payload.emergency,
     expiresAt: new Date(Date.now() + DEFAULT_REQUEST_TTL_MS),
+  }).catch((error) => {
+    if (error?.code === 11000) {
+      const duplicateError = new ApiError(
+        409,
+        "You already have an active blood request for this blood group."
+      );
+      throw duplicateError;
+    }
+    throw error;
   });
 
   const requestCoordinates = request.location.coordinates;
@@ -397,6 +441,7 @@ module.exports = {
   expireStaleActiveRequests,
   createBloodRequestWithRecipients,
   respondToBloodRequest,
+  cancelBloodRequest,
   getRecipientsForRequest,
   getIncomingRequestsForDonor,
   getRequestsForRequester,

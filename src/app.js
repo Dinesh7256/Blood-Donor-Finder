@@ -12,10 +12,22 @@ const reportRoutes = require("./routes/reportRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
+const {
+  globalApiLimiter,
+  authLimiter,
+  bloodRequestCreateLimiter,
+  donorSearchLimiter,
+  phoneVerificationLimiter,
+  deviceTokenLimiter,
+} = require("./middleware/rateLimitMiddleware");
+
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.set("trust proxy", 1);
+
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+app.use("/api", globalApiLimiter);
 
 const allowedOrigin = process.env.CLIENT_URL || "http://localhost:3000";
 
@@ -26,9 +38,9 @@ app.use(
   })
 );
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/donors", donorRoutes);
+app.use("/api/donors", donorSearchLimiter, donorRoutes);
 app.use("/api/blood-requests", bloodRequestRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/blood-banks", bloodBankRoutes);

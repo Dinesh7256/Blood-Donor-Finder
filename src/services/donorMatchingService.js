@@ -27,6 +27,7 @@ const findEligibleDonorsForBloodRequest = async ({
     bloodGroup,
     isAvailable: true,
     isBanned: false,
+    phoneVerified: true,
     location: {
       $nearSphere: {
         $geometry: { type: "Point", coordinates },

@@ -6,10 +6,11 @@ const router = express.Router();
 
 const bloodRequestController = require("../controllers/bloodRequestController");
 const { protect } = require("../middleware/authMiddleware");
+const { bloodRequestCreateLimiter } = require("../middleware/rateLimitMiddleware");
 
 router.use(protect);
 
-router.post("/", bloodRequestController.createBloodRequest);
+router.post("/", bloodRequestCreateLimiter, bloodRequestController.createBloodRequest);
 router.get("/mine", bloodRequestController.getMyBloodRequests);
 router.get("/incoming", bloodRequestController.getIncomingBloodRequests);
 router.get("/:id", bloodRequestController.getBloodRequestById);

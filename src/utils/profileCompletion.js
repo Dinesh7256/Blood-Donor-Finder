@@ -107,25 +107,58 @@ const buildProfileStatus = (user) => {
 };
 
 const serializeUserForClient = (user) => {
-  const plainUser = user?.toObject ? user.toObject() : { ...user };
   const status = buildProfileStatus(user);
 
   return {
-    ...plainUser,
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    phoneVerified: Boolean(user.phoneVerified),
+    phoneVerifiedAt: user.phoneVerifiedAt || null,
+    address: user.address,
+    bloodGroup: user.bloodGroup,
+    isAvailable: Boolean(user.isAvailable),
+    location: user.location,
     profileCompleted: status.profileComplete,
     missingFields: status.missingFields,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   };
 };
 
-const assertCanCreateBloodRequest = (user) => {
+const canRequestBlood = (user) => {
   if (!user?._id) {
-    throw new ApiError(403, "Complete your profile before requesting blood.");
+    return {
+      allowed: false,
+      reason: "Complete your profile before requesting blood.",
+    };
   }
 
   if (!computeProfileCompleted(user)) {
     const missing = getMissingProfileRequirements(user);
     const detail = missing.length ? ` Missing: ${missing.join(", ")}.` : "";
-    throw new ApiError(403, `Complete your profile before requesting blood.${detail}`);
+    return {
+      allowed: false,
+      reason: `Complete your profile before requesting blood.${detail}`,
+    };
+  }
+
+  if (!user.phoneVerified) {
+    return {
+      allowed: false,
+      reason: "Phone number verification is required before creating a blood request.",
+    };
+  }
+
+  return { allowed: true, reason: null };
+};
+
+const assertCanCreateBloodRequest = (user) => {
+  const eligibility = canRequestBlood(user);
+
+  if (!eligibility.allowed) {
+    throw new ApiError(403, eligibility.reason);
   }
 };
 
@@ -137,5 +170,6 @@ module.exports = {
   buildProfileStatus,
   serializeUserForClient,
   PROFILE_FIELD_KEYS,
+  canRequestBlood,
   assertCanCreateBloodRequest,
 };

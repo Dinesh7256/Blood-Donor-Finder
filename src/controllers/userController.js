@@ -1,7 +1,16 @@
 const ApiError = require("../utils/ApiError");
+const admin = require("../config/firebase");
 const { isFcmRegistrationToken, isLikelyFirebaseIdToken } = require("../utils/fcmToken");
 const { computeProfileCompleted, serializeUserForClient } = require("../utils/profileCompletion");
-const { validateName, validateBloodGroup, validatePhone, validateAddress } = require("../utils/userValidation");
+const {
+  validateName,
+  validateBloodGroup,
+  validatePhone,
+  validateAddress,
+  phonesMatch,
+} = require("../utils/userValidation");
+
+const MAX_FCM_TOKENS_PER_USER = 10;
 
 const parseDeviceToken = (body) => {
   const token = body?.token ?? body?.fcmToken;
@@ -38,6 +47,10 @@ const userController = {
     try {
       const { name, phone, bloodGroup, address, isAvailable } = req.body;
 
+      if (req.body.phoneVerified !== undefined || req.body.phoneVerifiedAt !== undefined) {
+        return next(new ApiError(400, "Phone verification status cannot be updated directly."));
+      }
+
       if (name !== undefined) {
         const nameResult = validateName(name);
         if (!nameResult.valid) {
@@ -55,6 +68,7 @@ const userController = {
         if (phoneResult.value !== req.user.phone) {
           req.user.phone = phoneResult.value;
           req.user.phoneVerified = false;
+          req.user.phoneVerifiedAt = null;
         }
       }
 
@@ -134,6 +148,9 @@ const userController = {
 
       if (!req.user.fcmTokens) req.user.fcmTokens = [];
       if (!req.user.fcmTokens.includes(token)) {
+        if (req.user.fcmTokens.length >= MAX_FCM_TOKENS_PER_USER) {
+          req.user.fcmTokens.shift();
+        }
         req.user.fcmTokens.push(token);
         await req.user.save();
       }
@@ -171,6 +188,44 @@ const userController = {
         success: true,
         data: { removed, tokenCount: req.user.fcmTokens.length },
       });
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  confirmPhoneVerification: async (req, res, next) => {
+    try {
+      const firebaseUid = req.user.firebaseUid;
+
+      if (!firebaseUid) {
+        return next(new ApiError(403, "Authenticated user is required."));
+      }
+
+      const phoneResult = validatePhone(req.user.phone, { required: true });
+      if (!phoneResult.valid) {
+        return next(new ApiError(400, "Add and save your phone number before verifying."));
+      }
+
+      let firebaseUser;
+      try {
+        firebaseUser = await admin.auth().getUser(firebaseUid);
+      } catch (firebaseError) {
+        return next(new ApiError(503, "Unable to verify phone number right now. Please try again."));
+      }
+
+      if (!firebaseUser.phoneNumber) {
+        return next(new ApiError(400, "Phone number is not verified with Firebase."));
+      }
+
+      if (!phonesMatch(firebaseUser.phoneNumber, req.user.phone)) {
+        return next(new ApiError(400, "Verified phone number does not match your profile."));
+      }
+
+      req.user.phoneVerified = true;
+      req.user.phoneVerifiedAt = new Date();
+      const user = await req.user.save();
+
+      return res.status(200).json({ success: true, data: serializeUserForClient(user) });
     } catch (error) {
       return next(error);
     }

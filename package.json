@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-  "test": "echo \"Error: no test specified\" && exit 1",
-  "start": "node src/server.js",
-  "dev": "nodemon src/server.js",
-  "seed:users": "node scripts/seedUsers.js",
-  "seed:users:reset": "node scripts/seedUsers.js --reset"
-},
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "seed:users": "node scripts/seedUsers.js",
+    "seed:users:reset": "node scripts/seedUsers.js --reset"
+  },
   "author": "",
   "license": "ISC",
   "description": "",
@@ -16,6 +16,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "firebase-admin": "^14.2.0",
     "mongoose": "^9.9.1"
   }

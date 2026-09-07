@@ -1,8 +1,8 @@
-const BloodRequest = require("../models/BloodRequest");
 const ApiError = require("../utils/ApiError");
 const {
   notifyEligibleDonorsOfBloodRequest,
   notifyRequesterOfBloodRequestAcceptance,
+  notifyDonorsOfBloodRequestCancellation,
 } = require("../services/notificationService");
 const { logFcm } = require("../utils/fcmLog");
 const { BLOOD_GROUPS } = require("../constants/bloodGroups");
@@ -10,9 +10,11 @@ const { assertCanCreateBloodRequest } = require("../utils/profileCompletion");
 const {
   createBloodRequestWithRecipients,
   respondToBloodRequest,
+  cancelBloodRequest,
   getIncomingRequestsForDonor,
   getRequestsForRequester,
   getAuthorizedRequestDetail,
+  getRecipientsForRequest,
   serializeIncomingRequestForDonor,
   serializeRequestForRequester,
 } = require("../services/bloodRequestService");
@@ -49,11 +51,12 @@ const parseNotificationRadius = (radius) => {
   return parsedRadius;
 };
 
-const findRequestOrThrow = async (requestId) => {
-  const request = await BloodRequest.findById(requestId);
-  if (!request) throw new ApiError(404, "Blood request not found");
-  return request;
-};
+const serializeDuplicateRequestConflict = (duplicateRequest) => ({
+  _id: duplicateRequest._id,
+  bloodGroup: duplicateRequest.bloodGroup,
+  status: duplicateRequest.status,
+  createdAt: duplicateRequest.createdAt,
+});
 
 const createRequest = async (req, res, next) => {
   try {
@@ -112,6 +115,8 @@ const createRequest = async (req, res, next) => {
       bloodRequest: request,
       requesterId: req.user._id,
       radiusKm: notificationRadiusKm,
+      eligibleDonors,
+      recipients,
     });
 
     logFcm(`Blood request notification result=${notificationResult.reason}`);
@@ -127,7 +132,7 @@ const createRequest = async (req, res, next) => {
       return res.status(409).json({
         success: false,
         message: error.message,
-        data: error.data,
+        data: serializeDuplicateRequestConflict(error.data),
       });
     }
     return next(error);
@@ -199,6 +204,10 @@ const respondToRequest = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
+      message:
+        response === "accept"
+          ? "Blood request accepted successfully"
+          : "Blood request rejected successfully",
       data: {
         requestId: request._id,
         recipientId: recipient._id,
@@ -223,18 +232,20 @@ const rejectRequest = async (req, res, next) => {
 
 const cancelRequest = async (req, res, next) => {
   try {
-    const request = await findRequestOrThrow(req.params.id);
-    if (String(request.requester) !== String(req.user._id)) {
-      return next(new ApiError(403, "Only the requester can cancel this request"));
-    }
+    const request = await cancelBloodRequest({
+      requestId: req.params.id,
+      requesterId: req.user._id,
+    });
 
-    if (request.status !== "active") {
-      return next(new ApiError(400, "This request is no longer available."));
-    }
+    await notifyDonorsOfBloodRequestCancellation({ bloodRequest: request });
 
-    request.status = "cancelled";
-    await request.save();
-    return res.status(200).json({ success: true, data: request });
+    const recipients = await getRecipientsForRequest(request._id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Blood request cancelled successfully",
+      data: serializeRequestForRequester(request, recipients),
+    });
   } catch (error) {
     return next(error);
   }
