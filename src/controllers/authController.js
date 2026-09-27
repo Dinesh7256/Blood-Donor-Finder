@@ -1,7 +1,9 @@
 const admin = require("../config/firebase");
-const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
 const { serializeUserForClient } = require("../utils/profileCompletion");
+const {
+  findOrCreateUserForFirebaseAccount,
+} = require("../services/authUserProvisioning");
 
 const isFirebaseAuthVerificationError = (error) =>
   Boolean(
@@ -20,38 +22,28 @@ const handleAuthRouteError = (error, next) => {
 
 const registerUser = async (req, res, next) => {
   try {
-    const { idToken, name: requestedName } = req.body;
+    const { idToken, name: requestedName, email: fallbackEmail } = req.body;
 
     if (!idToken) {
       return next(new ApiError(400, "Firebase ID token is required"));
     }
 
+    console.log("[AUTH BACKEND] POST /auth/register request received");
+
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid, email, name } = decodedToken;
-
-    const existingUser = await User.findOne({ firebaseUid: uid });
-
-    if (existingUser) {
-      if (existingUser.isBanned) {
-        return next(new ApiError(403, "Your account has been suspended."));
-      }
-
-      return res.status(200).json({
-        success: true,
-        data: serializeUserForClient(existingUser),
-        message: "User already exists",
-      });
-    }
-
-    const newUser = await User.create({
-      firebaseUid: uid,
-      email,
-      name: requestedName || name || email,
+    const { user, created } = await findOrCreateUserForFirebaseAccount({
+      decodedToken,
+      requestedName,
+      fallbackEmail,
     });
 
-    return res.status(201).json({
+    const statusCode = created ? 201 : 200;
+    const message = created ? undefined : "User already exists";
+
+    return res.status(statusCode).json({
       success: true,
-      data: serializeUserForClient(newUser),
+      data: serializeUserForClient(user),
+      ...(message ? { message } : {}),
     });
   } catch (error) {
     if (error?.name === "MongoServerError" || error?.name === "ValidationError") {
@@ -69,15 +61,18 @@ const loginUser = async (req, res, next) => {
       return next(new ApiError(400, "Firebase ID token is required"));
     }
 
+    console.log("[AUTH BACKEND] POST /auth/login request received");
+
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const user = await User.findOne({ firebaseUid: decodedToken.uid });
+    const { user, created } = await findOrCreateUserForFirebaseAccount({
+      decodedToken,
+      requestedName: decodedToken.name,
+    });
 
-    if (!user) {
-      return next(new ApiError(404, "User not found, please register"));
-    }
-
-    if (user.isBanned) {
-      return next(new ApiError(403, "Your account has been suspended."));
+    if (created) {
+      console.log(
+        `[AUTH BACKEND] MongoDB user provisioned on login firebaseUid=${decodedToken.uid}`
+      );
     }
 
     return res.status(200).json({
