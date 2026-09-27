@@ -98,9 +98,8 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ location: "2dsphere" });
 userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
-userSchema.pre("save", function updateProfileCompletion(next) {
+userSchema.pre("save", function updateProfileCompletion() {
   this.profileCompleted = computeProfileCompleted(this);
-  next();
 });
 
 module.exports = mongoose.model("User", userSchema);
