@@ -3,6 +3,21 @@ const User = require("../models/User");
 const ApiError = require("../utils/ApiError");
 const { serializeUserForClient } = require("../utils/profileCompletion");
 
+const isFirebaseAuthVerificationError = (error) =>
+  Boolean(
+    error?.code?.startsWith?.("auth/") ||
+      /Decoding Firebase ID token|Firebase ID token|verifyIdToken/i.test(error?.message || "")
+  );
+
+const handleAuthRouteError = (error, next) => {
+  if (isFirebaseAuthVerificationError(error)) {
+    console.error("[AUTH BACKEND ERROR] Firebase ID token verification failed");
+    return next(new ApiError(401, "Invalid or expired authentication token"));
+  }
+
+  return next(error);
+};
+
 const registerUser = async (req, res, next) => {
   try {
     const { idToken, name: requestedName } = req.body;
@@ -39,7 +54,10 @@ const registerUser = async (req, res, next) => {
       data: serializeUserForClient(newUser),
     });
   } catch (error) {
-    return next(error);
+    if (error?.name === "MongoServerError" || error?.name === "ValidationError") {
+      console.error("[AUTH BACKEND ERROR] MongoDB user creation failed");
+    }
+    return handleAuthRouteError(error, next);
   }
 };
 
@@ -67,7 +85,7 @@ const loginUser = async (req, res, next) => {
       data: serializeUserForClient(user),
     });
   } catch (error) {
-    return next(error);
+    return handleAuthRouteError(error, next);
   }
 };
 

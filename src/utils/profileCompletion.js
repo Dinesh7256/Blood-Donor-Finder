@@ -111,6 +111,7 @@ const serializeUserForClient = (user) => {
 
   return {
     _id: user._id,
+    firebaseUid: user.firebaseUid,
     name: user.name,
     email: user.email,
     phone: user.phone,
